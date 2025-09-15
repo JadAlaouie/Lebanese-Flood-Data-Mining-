@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flood Data Mining - Search & Analyze</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🌊 Flood Data Mining</h1>
+        
+        <div class="search-section">
+            <form id="searchForm">
+                <input type="text" id="query" placeholder="Enter flood-related search terms..." required>
+                <button type="submit">🔍 Search & Scrape</button>
+            </form>
+            <div class="loading" id="loading">Searching and scraping articles...</div>
+        </div>
+
+        <div class="results-section">
+            <div class="results-header">
+                <div class="results-count" id="resultsCount"></div>
+            </div>
+            <ul id="results"></ul>
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">🔍</div>
+                <h3>Search for flood data</h3>
+                <p>Enter keywords to find relevant flood information and news</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        const searchForm = document.getElementById('searchForm');
+        const queryInput = document.getElementById('query');
+        const resultsContainer = document.getElementById('results');
+        const loadingIndicator = document.getElementById('loading');
+        const resultsCount = document.getElementById('resultsCount');
+        const emptyState = document.getElementById('emptyState');
+
+        searchForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // Show loading state
+            loadingIndicator.style.display = 'block';
+            resultsContainer.innerHTML = '';
+            resultsCount.textContent = '';
+            emptyState.style.display = 'none';
+
+            try {
+                const response = await fetch('http://localhost:5000/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const results = await response.json();
+                displayResults(results);
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                resultsContainer.innerHTML = `
+                    <li style="color: red; text-align: center; padding: 20px;">
+                        ❌ Search failed: ${error.message}
+                    </li>
+                `;
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        });
+
+        function displayResults(data) {
+            if (!data || !data.articles || data.articles.length === 0) {
+                emptyState.style.display = 'block';
+                resultsCount.textContent = '';
+                return;
+            }
+
+            const results = data.articles;
+            resultsCount.textContent = `Found ${data.total_results} result${data.total_results !== 1 ? 's' : ''} | Scraped ${data.scraped_count} article${data.scraped_count !== 1 ? 's' : ''}`;
+            
+            results.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = 'fade-in';
+                li.style.animationDelay = `${index * 0.1}s`;
+                
+                const title = item.title || 'Untitled';
+                const link = item.link || '#';
+                const snippet = item.snippet || 'No description available';
+                const content = item.content || 'Content not available';
+                const scraped = item.scraped;
+                const wordCount = item.word_count || 0;
+                
+                const scrapedBadge = scraped 
+                    ? `<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">✓ Scraped (${wordCount} words)</span>`
+                    : `<span style="background: #dc3545; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">✗ Failed</span>`;
+                
+                li.innerHTML = `
+                    <a href="${link}" target="_blank" rel="noopener noreferrer">
+                        <div class="result-title">${title} ${scrapedBadge}</div>
+                        <div class="result-url">${link}</div>
+                        <div class="result-snippet">${snippet}</div>
+                        ${scraped ? `<div class="result-content" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 8px; color: #666; font-size: 0.9rem;"><strong>Article Preview:</strong><br>${content}</div>` : ''}
+                    </a>
+                `;
+                
+                resultsContainer.appendChild(li);
+            });
+        }
+
+        // Focus search input on page load
+        window.addEventListener('load', () => {
+            queryInput.focus();
+        });
+    </script>
+</body>
+</html>
