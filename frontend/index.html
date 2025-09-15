@@ -15,18 +15,32 @@
                 <input type="text" id="query" placeholder="Enter flood-related search terms..." required>
                 <button type="submit">🔍 Search & Scrape</button>
             </form>
+            <button id="analyzeBtn" class="analyze-btn">🤖 Analyze Existing Articles</button>
+            <button id="flaggedBtn" class="flagged-btn">🚩 View Flagged Articles</button>
             <div class="loading" id="loading">Searching and scraping articles...</div>
+            <div class="loading" id="analyzingLoading">Analyzing articles with AI...</div>
+            <div class="loading" id="flaggedLoading">Loading flagged articles...</div>
         </div>
 
         <div class="results-section">
             <div class="results-header">
                 <div class="results-count" id="resultsCount"></div>
+                <div class="view-toggle">
+                    <button id="searchView" class="toggle-btn active">Search Results</button>
+                    <button id="flaggedView" class="toggle-btn">Flagged Articles</button>
+                </div>
             </div>
             <ul id="results"></ul>
+            <ul id="flaggedResults" style="display: none;"></ul>
             <div class="empty-state" id="emptyState">
                 <div class="empty-icon">🔍</div>
                 <h3>Search for flood data</h3>
                 <p>Enter keywords to find relevant flood information and news</p>
+            </div>
+            <div class="empty-state" id="emptyFlagged" style="display: none;">
+                <div class="empty-icon">🚩</div>
+                <h3>No flagged articles yet</h3>
+                <p>Articles with Lebanese keywords will appear here after analysis</p>
             </div>
         </div>
     </div>
@@ -34,9 +48,36 @@
         const searchForm = document.getElementById('searchForm');
         const queryInput = document.getElementById('query');
         const resultsContainer = document.getElementById('results');
+        const flaggedResultsContainer = document.getElementById('flaggedResults');
         const loadingIndicator = document.getElementById('loading');
+        const analyzingIndicator = document.getElementById('analyzingLoading');
+        const flaggedLoadingIndicator = document.getElementById('flaggedLoading');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const flaggedBtn = document.getElementById('flaggedBtn');
         const resultsCount = document.getElementById('resultsCount');
         const emptyState = document.getElementById('emptyState');
+        const emptyFlagged = document.getElementById('emptyFlagged');
+        const searchViewBtn = document.getElementById('searchView');
+        const flaggedViewBtn = document.getElementById('flaggedView');
+
+        // View toggle functionality
+        searchViewBtn.addEventListener('click', function() {
+            searchViewBtn.classList.add('active');
+            flaggedViewBtn.classList.remove('active');
+            resultsContainer.style.display = 'block';
+            flaggedResultsContainer.style.display = 'none';
+            emptyState.style.display = resultsContainer.children.length ? 'none' : 'block';
+            emptyFlagged.style.display = 'none';
+        });
+
+        flaggedViewBtn.addEventListener('click', function() {
+            flaggedViewBtn.classList.add('active');
+            searchViewBtn.classList.remove('active');
+            resultsContainer.style.display = 'none';
+            flaggedResultsContainer.style.display = 'block';
+            emptyState.style.display = 'none';
+            emptyFlagged.style.display = flaggedResultsContainer.children.length ? 'none' : 'block';
+        });
 
         searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -76,6 +117,60 @@
             }
         });
 
+        analyzeBtn.addEventListener('click', async function() {
+            analyzingIndicator.style.display = 'block';
+            analyzeBtn.disabled = true;
+
+            try {
+                const response = await fetch('http://localhost:5000/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ limit: 10 })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                alert(`Analysis complete! ${result.analyzed_count} articles analyzed.`);
+                
+            } catch (error) {
+                console.error('Analysis error:', error);
+                alert(`Analysis failed: ${error.message}`);
+            } finally {
+                analyzingIndicator.style.display = 'none';
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        // Flagged articles functionality
+        flaggedBtn.addEventListener('click', async function() {
+            flaggedLoadingIndicator.style.display = 'block';
+            flaggedBtn.disabled = true;
+
+            try {
+                const response = await fetch('http://localhost:5000/flagged');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const results = await response.json();
+                displayFlaggedResults(results);
+                
+                // Switch to flagged view
+                flaggedViewBtn.click();
+                
+            } catch (error) {
+                console.error('Flagged articles error:', error);
+                alert(`Failed to load flagged articles: ${error.message}`);
+            } finally {
+                flaggedLoadingIndicator.style.display = 'none';
+                flaggedBtn.disabled = false;
+            }
+        });
+
         function displayResults(data) {
             if (!data || !data.articles || data.articles.length === 0) {
                 emptyState.style.display = 'block';
@@ -102,16 +197,102 @@
                     ? `<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">✓ Scraped (${wordCount} words)</span>`
                     : `<span style="background: #dc3545; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">✗ Failed</span>`;
                 
+                // AI Analysis badge and info
+                let aiAnalysis = '';
+                if (item.ai_analysis) {
+                    const ai = item.ai_analysis;
+                    const relevantBadge = ai.is_relevant 
+                        ? `<span style="background: #007bff; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">🤖 Flood-Related (${ai.confidence}%)</span>`
+                        : `<span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">🤖 Not Relevant (${ai.confidence}%)</span>`;
+                    
+                    // Add flagged indicator for Lebanese keywords
+                    const flaggedBadge = ai.keywords_found && ai.keywords_found.length > 0
+                        ? `<span class="flagged-indicator">🚩 Lebanese Keywords</span>`
+                        : '';
+                    
+                    aiAnalysis = `
+                        ${relevantBadge}
+                        ${flaggedBadge}
+                        ${ai.category !== 'unknown' ? `<span style="background: #17a2b8; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 5px;">${ai.category}</span>` : ''}
+                        <div class="ai-analysis" style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 0 8px 8px 0;">
+                            <div style="font-weight: bold; color: #1976d2; margin-bottom: 5px;">🤖 AI Analysis:</div>
+                            <div style="color: #333; font-size: 0.9rem;">${ai.summary}</div>
+                            ${ai.keywords_found && ai.keywords_found.length > 0 ? `<div style="margin-top: 5px; color: #666; font-size: 0.8rem;"><strong>Lebanese Keywords Found:</strong> ${ai.keywords_found.join(', ')}</div>` : ''}
+                        </div>
+                    `;
+                }
+                
                 li.innerHTML = `
                     <a href="${link}" target="_blank" rel="noopener noreferrer">
-                        <div class="result-title">${title} ${scrapedBadge}</div>
+                        <div class="result-title">${title} ${scrapedBadge} ${aiAnalysis ? aiAnalysis.split('<div class="ai-analysis"')[0] : ''}</div>
                         <div class="result-url">${link}</div>
                         <div class="result-snippet">${snippet}</div>
                         ${scraped ? `<div class="result-content" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 8px; color: #666; font-size: 0.9rem;"><strong>Article Preview:</strong><br>${content}</div>` : ''}
+                        ${aiAnalysis && aiAnalysis.includes('<div class="ai-analysis"') ? aiAnalysis.substring(aiAnalysis.indexOf('<div class="ai-analysis"')) : ''}
                     </a>
                 `;
                 
                 resultsContainer.appendChild(li);
+            });
+        }
+
+        function displayFlaggedResults(data) {
+            flaggedResultsContainer.innerHTML = '';
+            emptyFlagged.style.display = 'none';
+            
+            if (!data || !data.results || data.results.length === 0) {
+                emptyFlagged.style.display = 'block';
+                return;
+            }
+            
+            data.results.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = 'fade-in';
+                li.style.animationDelay = `${index * 0.1}s`;
+                
+                const title = item.title || 'Untitled';
+                const link = item.link || '#';
+                const snippet = item.snippet || 'No description available';
+                const content = item.scraped_content || '';
+                
+                const scraped = content && content.length > 0;
+                const scrapedBadge = scraped 
+                    ? '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">📄 Scraped</span>'
+                    : '<span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">🔗 Link Only</span>';
+                
+                let aiAnalysis = '';
+                if (item.ai_analysis) {
+                    const ai = item.ai_analysis;
+                    const relevantBadge = ai.is_relevant 
+                        ? `<span style="background: #007bff; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">🤖 Flood-Related (${ai.confidence}%)</span>`
+                        : `<span style="background: #6c757d; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">🤖 Not Relevant (${ai.confidence}%)</span>`;
+                    
+                    // Highlight flagged status prominently
+                    const flaggedBadge = `<span class="flagged-indicator">🚩 Lebanese Keywords</span>`;
+                    
+                    aiAnalysis = `
+                        ${flaggedBadge}
+                        ${relevantBadge}
+                        ${ai.category !== 'unknown' ? `<span style="background: #17a2b8; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 5px;">${ai.category}</span>` : ''}
+                        <div class="ai-analysis" style="margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ff6b35; border-radius: 0 8px 8px 0;">
+                            <div style="font-weight: bold; color: #d63031; margin-bottom: 5px;">🚩 Flagged Article - Lebanese Keywords Found:</div>
+                            <div style="color: #333; font-size: 0.9rem; margin-bottom: 8px;"><strong>Keywords:</strong> ${ai.keywords_found.join(', ')}</div>
+                            <div style="color: #333; font-size: 0.9rem;">${ai.summary}</div>
+                        </div>
+                    `;
+                }
+                
+                li.innerHTML = `
+                    <a href="${link}" target="_blank" rel="noopener noreferrer">
+                        <div class="result-title">${title} ${scrapedBadge} ${aiAnalysis ? aiAnalysis.split('<div class="ai-analysis"')[0] : ''}</div>
+                        <div class="result-url">${link}</div>
+                        <div class="result-snippet">${snippet}</div>
+                        ${scraped ? `<div class="result-content" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 8px; color: #666; font-size: 0.9rem;"><strong>Article Preview:</strong><br>${content}</div>` : ''}
+                        ${aiAnalysis && aiAnalysis.includes('<div class="ai-analysis"') ? aiAnalysis.substring(aiAnalysis.indexOf('<div class="ai-analysis"')) : ''}
+                    </a>
+                `;
+                
+                flaggedResultsContainer.appendChild(li);
             });
         }
 
