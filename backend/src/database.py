@@ -13,7 +13,9 @@ def init_db(db_path='flood_data.db'):
                   query TEXT NOT NULL,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     
-    c.execute('''CREATE TABLE IF NOT EXISTS search_results
+    # Drop and recreate search_results table to fix schema issues
+    c.execute('''DROP TABLE IF EXISTS search_results''')
+    c.execute('''CREATE TABLE search_results
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   query_id INTEGER,
                   url TEXT NOT NULL,
@@ -37,9 +39,26 @@ def init_db(db_path='flood_data.db'):
                   title TEXT,
                   content TEXT,
                   word_count INTEGER,
+                  image_count INTEGER DEFAULT 0,
                   scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   source_query TEXT,
                   success INTEGER DEFAULT 1)''')
+    
+    # New table for storing image data
+    c.execute('''CREATE TABLE IF NOT EXISTS scraped_images
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  article_id INTEGER,
+                  image_url TEXT NOT NULL,
+                  alt_text TEXT,
+                  caption TEXT,
+                  title TEXT,
+                  width INTEGER,
+                  height INTEGER,
+                  local_path TEXT,
+                  file_size INTEGER,
+                  downloaded INTEGER DEFAULT 0,
+                  scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (article_id) REFERENCES scraped_articles (id))''')
     
     # New table for AI analysis
     c.execute('''CREATE TABLE IF NOT EXISTS ai_analysis
@@ -109,17 +128,44 @@ def save_search_result(title, link, snippet, db_path="flood_data.db"):
     finally:
         conn.close()
 
-def save_scraped_article(url, title, content, word_count, source_query, success, db_path='flood_data.db'):
+def save_scraped_article(url, title, content, word_count, source_query, success, images=None, db_path='flood_data.db'):
+    """Save scraped article with optional images"""
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    
+    image_count = len(images) if images else 0
+    
     c.execute('''INSERT INTO scraped_articles 
-                 (url, title, content, word_count, source_query, success)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
-              (url, title, content, word_count, source_query, success))
+                 (url, title, content, word_count, image_count, source_query, success)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+              (url, title, content, word_count, image_count, source_query, success))
+    
     article_id = c.lastrowid
     conn.commit()
     conn.close()
+    
+    # Save images if provided
+    if images:
+        save_scraped_images(article_id, images, db_path)
+    
     return article_id
+
+def save_scraped_images(article_id, images, db_path='flood_data.db'):
+    """Save scraped images to database"""
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    for img in images:
+        c.execute('''INSERT INTO scraped_images 
+                     (article_id, image_url, alt_text, caption, title, width, height, 
+                      local_path, file_size, downloaded)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (article_id, img['url'], img['alt_text'], img['caption'], 
+                   img['title'], img['width'], img['height'], img['local_path'], 
+                   img['file_size'], img['downloaded']))
+    
+    conn.commit()
+    conn.close()
 
 def save_article(url, content, db_path='flood_data.db'):
     conn = sqlite3.connect(db_path)
@@ -127,3 +173,68 @@ def save_article(url, content, db_path='flood_data.db'):
     c.execute('INSERT INTO articles (url, content) VALUES (?, ?)', (url, content))
     conn.commit()
     conn.close()
+
+def get_unanalyzed_articles(limit=10, db_path='flood_data.db'):
+    """Get articles that haven't been analyzed yet"""
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT sa.id, sa.url, sa.title, sa.content 
+        FROM scraped_articles sa 
+        LEFT JOIN ai_analysis aa ON sa.id = aa.article_id 
+        WHERE aa.id IS NULL AND sa.success = 1 AND sa.content IS NOT NULL 
+        LIMIT ?
+    ''', (limit,))
+    
+    articles = []
+    for row in c.fetchall():
+        articles.append({
+            'id': row[0],
+            'url': row[1],
+            'title': row[2],
+            'content': row[3]
+        })
+    
+    conn.close()
+    return articles
+
+def get_flagged_articles(db_path='flood_data.db'):
+    """Get articles flagged with Lebanese keywords"""
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT sa.url, sa.title, sa.content, sa.image_count, 
+               aa.keywords_found, aa.confidence, aa.summary, aa.category, aa.is_relevant
+        FROM scraped_articles sa 
+        JOIN ai_analysis aa ON sa.id = aa.article_id 
+        WHERE aa.keywords_found IS NOT NULL 
+        AND aa.keywords_found != '[]' 
+        AND aa.keywords_found != ''
+        ORDER BY aa.confidence DESC
+    ''', )
+    
+    articles = []
+    for row in c.fetchall():
+        try:
+            keywords = json.loads(row[4]) if row[4] else []
+        except:
+            keywords = []
+            
+        articles.append({
+            'link': row[0],
+            'title': row[1],
+            'scraped_content': row[2][:500] if row[2] else '',
+            'image_count': row[3] or 0,
+            'ai_analysis': {
+                'keywords_found': keywords,
+                'confidence': row[5],
+                'summary': row[6],
+                'category': row[7],
+                'is_relevant': bool(row[8])
+            }
+        })
+    
+    conn.close()
+    return articles

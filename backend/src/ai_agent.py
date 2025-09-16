@@ -79,21 +79,19 @@ class FloodAnalysisAgent:
         """
         combined_text = f"{title} {content}".lower()
         
+        found_keywords = []
         found_lebanese = []
-        found_english = []
         
-        # Check Lebanese keywords
-        for keyword in self.lebanese_keywords:
-            if keyword in combined_text:
-                found_lebanese.append(keyword)
-        
-        # Check English keywords
-        for keyword in self.english_keywords:
-            if keyword in combined_text:
-                found_english.append(keyword)
+        # Check all keywords
+        for keyword in self.all_keywords:
+            if keyword.lower() in combined_text:
+                found_keywords.append(keyword)
+                # Check if it's Arabic (Lebanese specific)
+                if any(ord(char) > 127 for char in keyword):  # Contains non-ASCII (Arabic)
+                    found_lebanese.append(keyword)
         
         # Determine relevance based on keywords
-        total_found = len(found_lebanese) + len(found_english)
+        total_found = len(found_keywords)
         has_lebanese = len(found_lebanese) > 0
         
         # High relevance if Lebanese keywords are found
@@ -113,9 +111,8 @@ class FloodAnalysisAgent:
         return {
             "is_relevant": total_found > 0,
             "confidence": confidence,
-            "keywords_found": found_lebanese + found_english,
+            "keywords_found": found_keywords,
             "lebanese_keywords_found": found_lebanese,
-            "english_keywords_found": found_english,
             "category": category,
             "keyword_match_count": total_found,
             "priority_flag": has_lebanese  # High priority if Lebanese keywords found
