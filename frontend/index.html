@@ -17,6 +17,97 @@
             </form>
             <button id="analyzeBtn" class="analyze-btn">🤖 Analyze Existing Articles</button>
             <button id="flaggedBtn" class="flagged-btn">🚩 View Flagged Articles</button>
+            <button id="generateQueriesBtn" class="generate-queries-btn">🔍 Generate Search Queries</button>
+            
+            <!-- Query Generation Form -->
+            <div class="query-generation" id="queryGeneration" style="display: none;">
+                <div class="query-form">
+                    <h3>🤖 AI Query Generation Agent</h3>
+                    <p>Enter keywords and context to let our AI agent generate strategic search queries</p>
+                    
+                    <div class="form-row">
+                        <label for="keywordsInput">Keywords (comma-separated):</label>
+                        <input type="text" id="keywordsInput" placeholder="flood, lebanon, river, rain..." required>
+                    </div>
+                    
+                    <div class="form-row">
+                        <label for="contextInput">Context (optional):</label>
+                        <textarea id="contextInput" placeholder="Provide additional context for the AI agent to generate more relevant and strategic queries..." rows="3"></textarea>
+                    </div>
+                    
+                    <div class="form-row">
+                        <label for="queryCount">Number of queries:</label>
+                        <select id="queryCount">
+                            <option value="5">5 queries</option>
+                            <option value="10" selected>10 queries</option>
+                            <option value="15">15 queries</option>
+                            <option value="20">20 queries</option>
+                            <option value="30">30 queries</option>
+                            <option value="50">50 queries</option>
+                            <option value="75">75 queries</option>
+                            <option value="100">100 queries</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-row">
+                        <label for="languagePreference">Language preference:</label>
+                        <select id="languagePreference">
+                            <option value="mixed">Mixed (Arabic + English)</option>
+                            <option value="english">English only</option>
+                            <option value="arabic">Arabic only</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-row">
+                        <label for="modelSelection">AI Model:</label>
+                        <select id="modelSelection">
+                            <option value="llama2">Llama 2</option>
+                            <option value="mistral">Mistral</option>
+                            <option value="codellama">CodeLlama</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-buttons">
+                        <button type="button" id="generateBtn" class="generate-btn">🚀 Generate Agent Queries</button>
+                        <button type="button" id="cancelGenerateBtn" class="cancel-btn">❌ Cancel</button>
+                    </div>
+                </div>
+                
+                <!-- Generated Queries Display -->
+                <div class="generated-queries" id="generatedQueries" style="display: none;">
+                    <h3>📝 AI Agent Generated Search Queries</h3>
+                    
+                    <!-- Agent Reasoning Display -->
+                    <div class="agent-reasoning" id="agentReasoning" style="display: none;">
+                        <h4>🧠 Agent Reasoning</h4>
+                        <div class="reasoning-content" id="reasoningContent"></div>
+                    </div>
+                    
+                    <!-- Query Strategies Display -->
+                    <div class="query-strategies" id="queryStrategiesDisplay" style="display: none;">
+                        <h4>🎯 Query Strategies</h4>
+                        <div class="strategies-list" id="strategiesList"></div>
+                    </div>
+                    
+                    <!-- Search Focus Areas -->
+                    <div class="search-focus" id="searchFocusDisplay" style="display: none;">
+                        <h4>🔍 Search Focus Areas</h4>
+                        <div class="focus-list" id="focusList"></div>
+                    </div>
+                    
+                    <!-- Generated Queries List -->
+                    <div class="queries-container">
+                        <div class="queries-stats" id="queriesStats"></div>
+                        <div class="queries-list" id="queriesList"></div>
+                    </div>
+                    
+                    <div class="queries-actions">
+                        <button type="button" id="copyQueriesBtn" class="copy-btn">📋 Copy All Queries</button>
+                        <button type="button" id="copyStrategiesBtn" class="copy-strategies-btn">📋 Copy Strategies</button>
+                        <button type="button" id="newGenerationBtn" class="new-generation-btn">🔄 Generate New</button>
+                    </div>
+                </div>
+            </div>
             
             <!-- Enhanced Loading Indicators -->
             <div class="loading-container">
@@ -53,413 +144,8 @@
             </div>
         </div>
     </div>
-    <script>
-        const searchForm = document.getElementById('searchForm');
-        const queryInput = document.getElementById('query');
-        const resultsContainer = document.getElementById('results');
-        const loadingIndicator = document.getElementById('loading');
-        const analyzingIndicator = document.getElementById('analyzingLoading');
-        const flaggedLoadingIndicator = document.getElementById('flaggedLoading');
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        const flaggedBtn = document.getElementById('flaggedBtn');
-        const resultsCount = document.getElementById('resultsCount');
-        const emptyState = document.getElementById('emptyState');
-
-        searchForm.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const query = queryInput.value.trim();
-            if (!query) return;
-
-            // Show loading state with progress
-            loadingIndicator.style.display = 'block';
-            document.getElementById('loadingSubtitle').textContent = 'Starting search...';
-            document.getElementById('progressFill').style.width = '0%';
-            resultsContainer.innerHTML = '';
-            resultsCount.textContent = '';
-            emptyState.style.display = 'none';
-
-            // Start the search request (non-blocking)
-            const searchPromise = fetch('http://localhost:5000/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
-            });
-
-            // Start progress polling
-            const progressInterval = setInterval(async () => {
-                try {
-                    const progressResponse = await fetch('http://localhost:5000/search-progress');
-                    const progress = await progressResponse.json();
-                    
-                    updateProgressDisplay(progress);
-                    
-                    // If completed or error, stop polling
-                    if (progress.status === 'completed' || progress.status === 'error') {
-                        clearInterval(progressInterval);
-                        
-                        if (progress.status === 'completed') {
-                            // Wait a moment then hide loading and show results
-                            setTimeout(() => {
-                                loadingIndicator.style.display = 'none';
-                                if (progress.final_results) {
-                                    displayResults(progress.final_results);
-                                }
-                            }, 1000);
-                        } else if (progress.status === 'error') {
-                            loadingIndicator.style.display = 'none';
-                            showError(progress.error || 'Unknown error occurred');
-                        }
-                    }
-                } catch (error) {
-                    console.error('Progress polling error:', error);
-                }
-            }, 1000); // Poll every second
-
-            try {
-                const response = await searchPromise;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                // The response is handled by progress polling, but we can also handle it here as backup
-                const results = await response.json();
-                clearInterval(progressInterval);
-                
-                setTimeout(() => {
-                    loadingIndicator.style.display = 'none';
-                    displayResults(results);
-                }, 500);
-                
-            } catch (error) {
-                clearInterval(progressInterval);
-                console.error('Search error:', error);
-                loadingIndicator.style.display = 'none';
-                showError(error.message);
-            }
-        });
-
-        function updateProgressDisplay(progress) {
-            const { total, completed, current_url, status, results } = progress;
-            
-            if (total > 0) {
-                const percentage = Math.min((completed / total) * 100, 100);
-                document.getElementById('progressFill').style.width = percentage + '%';
-                
-                // Update subtitle based on status
-                if (status === 'searching') {
-                    document.getElementById('loadingSubtitle').textContent = 'Fetching search results from Google...';
-                } else if (status === 'scraping') {
-                    document.getElementById('loadingSubtitle').textContent = `Scraping article ${completed + 1} of ${total}...`;
-                    
-                    // Show current URL being scraped
-                    if (current_url) {
-                        const domain = new URL(current_url).hostname;
-                        document.getElementById('loadingSubtitle').innerHTML = `
-                            Scraping article ${completed + 1} of ${total}...<br>
-                            <small style="color: #888;">${domain}</small>
-                        `;
-                    }
-                } else if (status === 'completed') {
-                    document.getElementById('loadingSubtitle').textContent = 'Processing complete! Loading results...';
-                }
-                
-                // Show partial results as they come in
-                if (results && results.length > 0) {
-                    displayPartialResults(results, completed, total);
-                }
-            }
-        }
-
-        function displayPartialResults(partialResults, completed, total) {
-            // Clear previous partial results
-            resultsContainer.innerHTML = '';
-            
-            // Show progress header
-            resultsCount.innerHTML = `
-                <div class="results-summary">
-                    <span class="results-stats">📊 Processing ${total} articles</span>
-                    <span class="scraped-stats">✅ ${completed} completed</span>
-                    <span class="analysis-stats">⏳ ${total - completed} remaining</span>
-                </div>
-            `;
-            
-            // Display results as they come in
-            partialResults.forEach((item, index) => {
-                const li = document.createElement('li');
-                li.className = 'result-item fade-in';
-                li.style.animationDelay = `${index * 0.05}s`;
-                
-                const title = item.title || 'Processing...';
-                const link = item.link || '#';
-                const snippet = item.snippet || '';
-                const scraped = item.scraped;
-                
-                // Show processing status
-                const statusBadge = scraped 
-                    ? `<span class="badge badge-success">✅ Scraped (${item.word_count} words)</span>`
-                    : `<span class="badge badge-warning">⏳ Processing...</span>`;
-                
-                const imageBadge = item.image_count > 0 
-                    ? `<span class="badge badge-warning">🖼️ ${item.image_count} images</span>`
-                    : '';
-                
-                li.innerHTML = `
-                    <div class="result-header">
-                        <div class="result-title">
-                            <a href="${link}" target="_blank" rel="noopener noreferrer">${title}</a>
-                        </div>
-                        <div class="result-badges">
-                            ${statusBadge}
-                            ${imageBadge}
-                        </div>
-                    </div>
-                    <div class="result-url">${link}</div>
-                    <div class="result-snippet">${snippet}</div>
-                    ${scraped && item.content ? `
-                        <div class="result-content">
-                            <div class="content-header">📄 Article Preview:</div>
-                            <div class="content-text">${item.content}</div>
-                        </div>
-                    ` : ''}
-                `;
-                
-                resultsContainer.appendChild(li);
-            });
-        }
-
-        function showError(message) {
-            resultsContainer.innerHTML = `
-                <li class="error-message">
-                    <div class="error-icon">❌</div>
-                    <div class="error-text">
-                        <strong>Search Failed</strong><br>
-                        ${message}<br>
-                        <small>Please check that the backend server is running on localhost:5000</small>
-                    </div>
-                </li>
-            `;
-        }
-
-        analyzeBtn.addEventListener('click', async function() {
-            analyzingIndicator.style.display = 'block';
-            analyzeBtn.disabled = true;
-
-            try {
-                const response = await fetch('http://localhost:5000/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ limit: 10 })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const result = await response.json();
-                alert(`Analysis complete! ${result.analyzed_count} articles analyzed.`);
-                
-            } catch (error) {
-                console.error('Analysis error:', error);
-                alert(`Analysis failed: ${error.message}`);
-            } finally {
-                analyzingIndicator.style.display = 'none';
-                analyzeBtn.disabled = false;
-            }
-        });
-
-        // Flagged articles functionality - show all flagged articles
-        flaggedBtn.addEventListener('click', async function() {
-            flaggedLoadingIndicator.style.display = 'block';
-            flaggedBtn.disabled = true;
-            resultsContainer.innerHTML = '';
-            emptyState.style.display = 'none';
-
-            try {
-                const response = await fetch('http://localhost:5000/flagged');
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const results = await response.json();
-                
-                // Display flagged articles using the same displayResults function
-                displayResults(results);
-                
-            } catch (error) {
-                console.error('Flagged articles error:', error);
-                showError(`Failed to load flagged articles: ${error.message}`);
-            } finally {
-                flaggedLoadingIndicator.style.display = 'none';
-                flaggedBtn.disabled = false;
-            }
-        });
-
-        function displayResults(data) {
-            resultsContainer.innerHTML = '';
-            emptyState.style.display = 'none';
-            
-            if (!data || !data.articles || data.articles.length === 0) {
-                emptyState.style.display = 'block';
-                resultsCount.textContent = 'No results found';
-                return;
-            }
-
-            const results = data.articles;
-            const scrapedCount = data.scraped_count || 0;
-            const totalCount = data.total_results || results.length;
-            
-            // Enhanced results count with more details
-            const flaggedCount = results.filter(r => r.ai_analysis && r.ai_analysis.keywords_found && r.ai_analysis.keywords_found.length > 0).length;
-            const aiAnalyzedCount = results.filter(r => r.ai_analysis).length;
-            
-            // Special header for flagged articles
-            if (data.message && data.message.includes('Lebanese keywords')) {
-                resultsCount.innerHTML = `
-                    <div class="results-summary flagged-header">
-                        <div class="flagged-title">🚩 Lebanese Flagged Articles</div>
-                        <span class="results-stats">📊 ${totalCount} flagged articles</span>
-                        <span class="scraped-stats">✅ ${scrapedCount} successfully scraped</span>
-                        <span class="flagged-stats">🚩 ${flaggedCount} with Lebanese keywords</span>
-                        <span class="analysis-stats">🤖 ${aiAnalyzedCount} analyzed by AI</span>
-                    </div>
-                `;
-            } else {
-                // Regular search results header
-                resultsCount.innerHTML = `
-                    <div class="results-summary">
-                        <span class="results-stats">📊 ${totalCount} articles found</span>
-                        <span class="scraped-stats">✅ ${scrapedCount} successfully scraped</span>
-                        <span class="analysis-stats">🤖 ${aiAnalyzedCount} analyzed by AI</span>
-                        <span class="flagged-stats">🚩 ${flaggedCount} Lebanese keywords detected</span>
-                    </div>
-                `;
-            }
-            
-            results.forEach((item, index) => {
-                const li = document.createElement('li');
-                li.className = 'result-item fade-in';
-                li.style.animationDelay = `${index * 0.1}s`;
-                
-                const title = item.title || 'Untitled Article';
-                const link = item.link || '#';
-                const snippet = item.snippet || 'No description available';
-                const content = item.content || '';
-                const scraped = item.scraped;
-                const wordCount = item.word_count || 0;
-                
-                // Status badges
-                const scrapedBadge = scraped 
-                    ? `<span class="badge badge-success">✓ Scraped (${wordCount} words)</span>`
-                    : `<span class="badge badge-danger">✗ Scraping failed</span>`;
-                
-                const imageBadge = item.image_count && item.image_count > 0 
-                    ? `<span class="badge badge-warning">🖼️ ${item.image_count} images</span>`
-                    : '';
-                
-                // AI Analysis section
-                let aiSection = '';
-                if (item.ai_analysis) {
-                    const ai = item.ai_analysis;
-                    const relevantBadge = ai.is_relevant 
-                        ? `<span class="badge badge-info">🤖 Flood-Related (${ai.confidence || 'N/A'}%)</span>`
-                        : `<span class="badge badge-secondary">🤖 Not Relevant (${ai.confidence || 'N/A'}%)</span>`;
-                    
-                    // Lebanese keywords badge
-                    const flaggedBadge = ai.keywords_found && ai.keywords_found.length > 0
-                        ? `<span class="badge badge-lebanese">🚩 Lebanese Keywords (${ai.keywords_found.length})</span>`
-                        : '';
-                    
-                    // AI analysis details
-                    aiSection = `
-                        <div class="ai-analysis-section">
-                            <div class="ai-badges">
-                                ${relevantBadge}
-                                ${flaggedBadge}
-                                ${ai.category && ai.category !== 'unknown' ? `<span class="badge badge-category">${ai.category}</span>` : ''}
-                            </div>
-                            ${ai.summary ? `
-                                <div class="ai-summary">
-                                    <div class="ai-summary-header">🤖 AI Summary:</div>
-                                    <div class="ai-summary-text">${ai.summary}</div>
-                                </div>
-                            ` : ''}
-                            ${ai.keywords_found && ai.keywords_found.length > 0 ? `
-                                <div class="lebanese-keywords">
-                                    <div class="keywords-header">🚩 Lebanese Keywords Found:</div>
-                                    <div class="keywords-list">${ai.keywords_found.map(kw => `<span class="keyword-tag">${kw}</span>`).join('')}</div>
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
-                }
-                
-                // Images section
-                let imagesSection = '';
-                if (item.images && item.images.length > 0) {
-                    const displayImages = item.images.slice(0, 3);
-                    imagesSection = `
-                        <div class="images-section">
-                            <div class="images-header">📸 Images Found (${item.image_count}):</div>
-                            <div class="images-list">
-                                ${displayImages.map(img => `
-                                    <div class="image-item">
-                                        <span class="image-icon">🖼️</span>
-                                        <span class="image-details">
-                                            ${img.alt_text || 'Image'}
-                                            ${img.caption ? `<br><small>${img.caption}</small>` : ''}
-                                        </span>
-                                    </div>
-                                `).join('')}
-                                ${item.images.length > 3 ? `<div class="more-images">...and ${item.images.length - 3} more images</div>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }
-                
-                li.innerHTML = `
-                    <div class="result-card ${item.ai_analysis && item.ai_analysis.keywords_found && item.ai_analysis.keywords_found.length > 0 ? 'flagged-article' : ''}">
-                        <div class="result-header">
-                            <h3 class="result-title">
-                                <a href="${link}" target="_blank" rel="noopener noreferrer" class="title-link">
-                                    ${title}
-                                </a>
-                            </h3>
-                            <div class="badges-container">
-                                ${scrapedBadge}
-                                ${imageBadge}
-                            </div>
-                        </div>
-                        
-                        <div class="result-url">
-                            <a href="${link}" target="_blank" rel="noopener noreferrer" class="url-link">
-                                🔗 ${link}
-                            </a>
-                        </div>
-                        
-                        <div class="result-snippet">${snippet}</div>
-                        
-                        ${scraped && content ? `
-                            <div class="content-preview">
-                                <strong>📄 Article Preview:</strong>
-                                <div class="preview-text">${content.substring(0, 400)}${content.length > 400 ? '...' : ''}</div>
-                            </div>
-                        ` : ''}
-                        ${imagesSection}
-                        ${aiSection}
-                    </div>
-                `;
-                
-                resultsContainer.appendChild(li);
-            });
-        }
-
-        // Focus search input on page load
-        window.addEventListener('load', () => {
-            queryInput.focus();
-        });
-    </script>
+    
+    <!-- Include the JavaScript file -->
+    <script src="script.js"></script>
 </body>
 </html>
