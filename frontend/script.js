@@ -6,8 +6,6 @@ const resultsContainer = document.getElementById('results');
 const loadingIndicator = document.getElementById('loading');
 const analyzingIndicator = document.getElementById('analyzingLoading');
 const flaggedLoadingIndicator = document.getElementById('flaggedLoading');
-const analyzeBtn = document.getElementById('analyzeBtn');
-const flaggedBtn = document.getElementById('flaggedBtn');
 const resultsCount = document.getElementById('resultsCount');
 const emptyState = document.getElementById('emptyState');
 
@@ -24,6 +22,18 @@ const queriesList = document.getElementById('queriesList');
 const copyQueriesBtn = document.getElementById('copyQueriesBtn');
 const newGenerationBtn = document.getElementById('newGenerationBtn');
 
+// Automatically convert pasted queries separated by spaces into newlines
+queryInput.addEventListener('paste', function(e) {
+    e.preventDefault();
+    let pasted = (e.clipboardData || window.clipboardData).getData('text');
+    // If pasted text is a long space-separated string, convert to newlines
+    if (pasted.split(' ').length > 5 && pasted.indexOf('\n') === -1 && pasted.indexOf(';') === -1) {
+        // Split by multiple spaces, then join by newlines
+        pasted = pasted.split(/(?<=\S) (?=\S)/g).join('\n');
+    }
+    document.execCommand('insertText', false, pasted);
+});
+
 // ========================================
 // SEARCH FUNCTIONALITY
 // ========================================
@@ -33,6 +43,9 @@ searchForm.addEventListener('submit', async function(e) {
     
     const query = queryInput.value.trim();
     if (!query) return;
+
+    // Support multiple queries separated by newlines or semicolons
+    let queries = query.split(/,|;|\||\n/).map(q => q.trim()).filter(q => q.length > 0);
 
     // Show loading state with progress
     loadingIndicator.style.display = 'block';
@@ -46,7 +59,7 @@ searchForm.addEventListener('submit', async function(e) {
     const searchPromise = fetch('http://localhost:5000/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
+        body: JSON.stringify({ queries })
     });
 
     // Start progress polling
@@ -65,6 +78,7 @@ searchForm.addEventListener('submit', async function(e) {
                     // Wait a moment then hide loading and show results
                     setTimeout(() => {
                         loadingIndicator.style.display = 'none';
+                        // Call displayResults with the final results
                         if (progress.final_results) {
                             displayResults(progress.final_results);
                         }
@@ -76,6 +90,8 @@ searchForm.addEventListener('submit', async function(e) {
             }
         } catch (error) {
             console.error('Error polling progress:', error);
+            // This is a network or parsing error, stop polling
+            clearInterval(progressInterval);
         }
     }, 1000);
 
@@ -86,74 +102,12 @@ searchForm.addEventListener('submit', async function(e) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        // The results will be handled by progress polling
+        // The results will be handled by progress polling, no need to process the response here
     } catch (error) {
         clearInterval(progressInterval);
         loadingIndicator.style.display = 'none';
         console.error('Search error:', error);
         alert('Search failed. Please check if the backend server is running.');
-    }
-});
-
-// ========================================
-// ANALYSIS FUNCTIONALITY
-// ========================================
-
-analyzeBtn.addEventListener('click', async function() {
-    analyzingIndicator.style.display = 'block';
-    resultsContainer.innerHTML = '';
-    resultsCount.textContent = '';
-    emptyState.style.display = 'none';
-
-    try {
-        const response = await fetch('http://localhost:5000/analyze');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        analyzingIndicator.style.display = 'none';
-        
-        if (data.success) {
-            displayAnalysisResults(data);
-        } else {
-            alert('Analysis failed: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        analyzingIndicator.style.display = 'none';
-        console.error('Analysis error:', error);
-        alert('Analysis failed. Please check if the backend server is running.');
-    }
-});
-
-// ========================================
-// FLAGGED ARTICLES FUNCTIONALITY
-// ========================================
-
-flaggedBtn.addEventListener('click', async function() {
-    flaggedLoadingIndicator.style.display = 'block';
-    resultsContainer.innerHTML = '';
-    resultsCount.textContent = '';
-    emptyState.style.display = 'none';
-
-    try {
-        const response = await fetch('http://localhost:5000/flagged-articles');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        flaggedLoadingIndicator.style.display = 'none';
-        
-        if (data.success) {
-            displayFlaggedResults(data.articles);
-        } else {
-            alert('Failed to load flagged articles: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        flaggedLoadingIndicator.style.display = 'none';
-        console.error('Flagged articles error:', error);
-        alert('Failed to load flagged articles. Please check if the backend server is running.');
     }
 });
 
@@ -213,7 +167,7 @@ generateBtn.addEventListener('click', async function() {
             body: JSON.stringify({
                 keywords: keywordList,
                 context: context,
-                count: count,
+                num_queries: count,
                 language: language,
                 model: model
             })
@@ -248,14 +202,15 @@ generateBtn.addEventListener('click', async function() {
 
 copyQueriesBtn.addEventListener('click', function() {
     const queries = Array.from(document.querySelectorAll('.query-text'))
-        .map(el => el.textContent)
-        .join('\n');
-    
+        .map(el => el.textContent.trim())
+        .filter(q => q.length > 0)
+        .join(', '); // Each query separated by a comma
+
     navigator.clipboard.writeText(queries).then(function() {
         const originalText = copyQueriesBtn.textContent;
         copyQueriesBtn.textContent = '✅ Copied!';
         copyQueriesBtn.style.background = '#4CAF50';
-        
+
         setTimeout(() => {
             copyQueriesBtn.textContent = originalText;
             copyQueriesBtn.style.background = '';
@@ -450,270 +405,87 @@ function updateProgressDisplay(progress) {
         progressFill.style.width = progress.progress_percentage + '%';
     }
     
-    // Display partial results if available
+    // Check if partial results are available and display them
     if (progress.partial_results && progress.partial_results.length > 0) {
-        const results = progress.partial_results;
-        const completed = progress.completed_count || 0;
-        const total = progress.total_count || results.length;
-        
-        if (results.length > 0) {
-            displayPartialResults(results, completed, total);
-        }
+        displayPartialResults(progress.partial_results);
     }
 }
 
-function displayPartialResults(partialResults, completed, total) {
-    // Clear previous partial results
+function displayResults(data) {
     resultsContainer.innerHTML = '';
     
-    // Show progress header
-    resultsCount.innerHTML = `
-        <div class="results-summary">
-            <span class="results-stats">📊 Processing ${total} articles</span>
-            <span class="scraped-stats">✅ ${completed} completed</span>
-            <span class="analysis-stats">⏳ ${total - completed} remaining</span>
-        </div>
-    `;
-    
-    // Display results as they come in
-    partialResults.forEach((item, index) => {
-        const li = document.createElement('li');
-        li.className = 'result-item fade-in';
-        li.style.animationDelay = `${index * 0.05}s`;
-        
-        const title = item.title || 'Processing...';
-        const link = item.link || '#';
-        const snippet = item.snippet || '';
-        const scraped = item.scraped;
-        
-        // Show processing status
-        const statusBadge = scraped 
-            ? `<span class="badge badge-success">✅ Scraped (${item.word_count} words)</span>`
-            : `<span class="badge badge-warning">⏳ Processing...</span>`;
-        
-        const imageBadge = item.image_count > 0 
-            ? `<span class="badge badge-warning">🖼️ ${item.image_count} images</span>`
-            : '';
-        
-        li.innerHTML = `
-            <div class="result-header">
-                <div class="result-title">
-                    <a href="${link}" target="_blank" class="result-link">${title}</a>
-                </div>
-                <div class="result-badges">
-                    ${statusBadge}
-                    ${imageBadge}
-                </div>
-            </div>
-            <div class="result-snippet">${snippet}</div>
-            ${scraped && item.full_content ? `
-                <div class="scraped-preview">
-                    <p><strong>Content Preview:</strong></p>
-                    <p class="content-preview">${item.full_content.substring(0, 200)}...</p>
-                </div>
-            ` : ''}
-            ${item.images && item.images.length > 0 ? `
-                <div class="scraped-images">
-                    <p><strong>Images found:</strong></p>
-                    <div class="image-gallery">
-                        ${item.images.slice(0, 3).map(img => `
-                            <img src="${img}" alt="Article image" class="preview-image" onerror="this.style.display='none'">
-                        `).join('')}
+    if (!data || !data.results || data.results.length === 0) {
+        emptyState.style.display = 'block';
+        resultsCount.textContent = 'No results found.';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+    resultsCount.textContent = `Found ${data.total_articles} relevant articles across ${data.total_queries} queries.`;
+
+    data.results.forEach(queryGroup => {
+        const queryHeader = document.createElement('h2');
+        queryHeader.textContent = `Results for query: "${queryGroup.query}"`;
+        resultsContainer.appendChild(queryHeader);
+
+        const groupList = document.createElement('ul');
+        queryGroup.articles.forEach((article, index) => {
+            const li = document.createElement('li');
+            li.className = 'result-item fade-in';
+            li.style.animationDelay = `${index * 0.05}s`;
+            
+            const title = article.title || 'No title';
+            const link = article.link || '#';
+            const snippet = article.snippet || 'No description available';
+            
+            const flaggedBadge = article.flagged 
+                ? `<span class="badge badge-danger">🚩 Flagged by AI</span>`
+                : `<span class="badge badge-success">✅ Clean</span>`;
+
+            const imageBadge = article.image_count > 0 
+                ? `<span class="badge badge-info">🖼️ ${article.image_count} images</span>`
+                : '';
+            
+            li.innerHTML = `
+                <div class="result-header">
+                    <div class="result-title">
+                        <a href="${link}" target="_blank" class="result-link">${title}</a>
+                    </div>
+                    <div class="result-badges">
+                        ${flaggedBadge}
+                        ${imageBadge}
+                        <span class="badge badge-info">📝 ${article.word_count || 0} words</span>
                     </div>
                 </div>
-            ` : ''}
-        `;
-        
-        resultsContainer.appendChild(li);
-    });
-}
-
-function displayResults(results) {
-    resultsContainer.innerHTML = '';
-    
-    if (!results || results.length === 0) {
-        emptyState.style.display = 'block';
-        resultsCount.textContent = '';
-        return;
-    }
-
-    emptyState.style.display = 'none';
-    resultsCount.innerHTML = `
-        <div class="results-summary">
-            <span class="results-stats">📊 Found ${results.length} articles</span>
-            <span class="scraped-stats">✅ All completed</span>
-        </div>
-    `;
-
-    results.forEach((item, index) => {
-        const li = document.createElement('li');
-        li.className = 'result-item fade-in';
-        li.style.animationDelay = `${index * 0.05}s`;
-        
-        const title = item.title || 'No title';
-        const link = item.link || '#';
-        const snippet = item.snippet || 'No description available';
-        
-        const flaggedBadge = item.flagged 
-            ? `<span class="badge badge-danger">🚩 Flagged by AI</span>`
-            : `<span class="badge badge-success">✅ Clean</span>`;
-        
-        const imageBadge = item.image_count > 0 
-            ? `<span class="badge badge-info">🖼️ ${item.image_count} images</span>`
-            : '';
-        
-        li.innerHTML = `
-            <div class="result-header">
-                <div class="result-title">
-                    <a href="${link}" target="_blank" class="result-link">${title}</a>
-                </div>
-                <div class="result-badges">
-                    ${flaggedBadge}
-                    ${imageBadge}
-                    <span class="badge badge-info">📝 ${item.word_count} words</span>
-                </div>
-            </div>
-            <div class="result-snippet">${snippet}</div>
-            ${item.full_content ? `
-                <div class="scraped-preview">
-                    <p><strong>Content Preview:</strong></p>
-                    <p class="content-preview">${item.full_content.substring(0, 200)}...</p>
-                </div>
-            ` : ''}
-            ${item.images && item.images.length > 0 ? `
-                <div class="scraped-images">
-                    <p><strong>Images found:</strong></p>
-                    <div class="image-gallery">
-                        ${item.images.slice(0, 3).map(img => `
-                            <img src="${img}" alt="Article image" class="preview-image" onerror="this.style.display='none'">
-                        `).join('')}
+                <div class="result-snippet">${snippet}</div>
+                ${article.full_content ? `
+                    <div class="scraped-preview">
+                        <p><strong>Content Preview:</strong></p>
+                        <p class="content-preview">${article.full_content.substring(0, 200)}...</p>
                     </div>
-                </div>
-            ` : ''}
-        `;
-        
-        resultsContainer.appendChild(li);
+                ` : ''}
+                ${article.images && article.images.length > 0 ? `
+                    <div class="scraped-images">
+                        <p><strong>Images found:</strong></p>
+                        <div class="image-gallery">
+                            ${article.images.slice(0, 3).map(img => `
+                                <img src="${img}" alt="Article image" class="preview-image" onerror="this.style.display='none'">
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+            
+            groupList.appendChild(li);
+        });
+        resultsContainer.appendChild(groupList);
     });
 }
 
-function displayAnalysisResults(data) {
-    resultsContainer.innerHTML = '';
-    
-    if (!data.articles || data.articles.length === 0) {
-        emptyState.style.display = 'block';
-        resultsCount.textContent = 'No articles found for analysis';
-        return;
-    }
-
-    emptyState.style.display = 'none';
-    resultsCount.innerHTML = `
-        <div class="results-summary">
-            <span class="results-stats">📊 Analyzed ${data.articles.length} articles</span>
-            <span class="flagged-stats">🚩 ${data.flagged_count || 0} flagged</span>
-            <span class="clean-stats">✅ ${data.articles.length - (data.flagged_count || 0)} clean</span>
-        </div>
-    `;
-
-    data.articles.forEach((item, index) => {
-        const li = document.createElement('li');
-        li.className = 'result-item fade-in';
-        li.style.animationDelay = `${index * 0.05}s`;
-        
-        const title = item.title || 'No title';
-        const link = item.link || '#';
-        const snippet = item.snippet || 'No description available';
-        
-        const flaggedBadge = item.flagged 
-            ? `<span class="badge badge-danger">🚩 Flagged by AI</span>`
-            : `<span class="badge badge-success">✅ Clean</span>`;
-        
-        const imageBadge = item.image_count > 0 
-            ? `<span class="badge badge-info">🖼️ ${item.image_count} images</span>`
-            : '';
-        
-        li.innerHTML = `
-            <div class="result-header">
-                <div class="result-title">
-                    <a href="${link}" target="_blank" class="result-link">${title}</a>
-                </div>
-                <div class="result-badges">
-                    ${flaggedBadge}
-                    ${imageBadge}
-                    <span class="badge badge-info">📝 ${item.word_count || 0} words</span>
-                </div>
-            </div>
-            <div class="result-snippet">${snippet}</div>
-            ${item.flagged && item.flagged_keywords ? `
-                <div class="flagged-info">
-                    <p><strong>🚩 Flagged Keywords:</strong> ${item.flagged_keywords.join(', ')}</p>
-                </div>
-            ` : ''}
-            ${item.full_content ? `
-                <div class="scraped-preview">
-                    <p><strong>Content Preview:</strong></p>
-                    <p class="content-preview">${item.full_content.substring(0, 200)}...</p>
-                </div>
-            ` : ''}
-        `;
-        
-        resultsContainer.appendChild(li);
-    });
-}
-
-function displayFlaggedResults(articles) {
-    resultsContainer.innerHTML = '';
-    
-    if (!articles || articles.length === 0) {
-        emptyState.style.display = 'block';
-        resultsCount.textContent = 'No flagged articles found';
-        return;
-    }
-
-    emptyState.style.display = 'none';
-    resultsCount.innerHTML = `
-        <div class="results-summary">
-            <span class="flagged-stats">🚩 ${articles.length} flagged articles</span>
-        </div>
-    `;
-
-    articles.forEach((item, index) => {
-        const li = document.createElement('li');
-        li.className = 'result-item flagged fade-in';
-        li.style.animationDelay = `${index * 0.05}s`;
-        
-        const title = item.title || 'No title';
-        const link = item.link || '#';
-        const snippet = item.snippet || 'No description available';
-        
-        const imageBadge = item.image_count > 0 
-            ? `<span class="badge badge-info">🖼️ ${item.image_count} images</span>`
-            : '';
-        
-        li.innerHTML = `
-            <div class="result-header">
-                <div class="result-title">
-                    <a href="${link}" target="_blank" class="result-link">${title}</a>
-                </div>
-                <div class="result-badges">
-                    <span class="badge badge-danger">🚩 AI Flagged</span>
-                    ${imageBadge}
-                    <span class="badge badge-info">📝 ${item.word_count || 0} words</span>
-                </div>
-            </div>
-            <div class="result-snippet">${snippet}</div>
-            ${item.flagged_keywords ? `
-                <div class="flagged-info">
-                    <p><strong>🚩 Detected Keywords:</strong> ${item.flagged_keywords.join(', ')}</p>
-                </div>
-            ` : ''}
-            ${item.full_content ? `
-                <div class="scraped-preview">
-                    <p><strong>Content Preview:</strong></p>
-                    <p class="content-preview">${item.full_content.substring(0, 200)}...</p>
-                </div>
-            ` : ''}
-        `;
-        
-        resultsContainer.appendChild(li);
-    });
+// Function to display partial results during scraping (not needed for final display)
+function displayPartialResults(partialResults) {
+    // This function is no longer needed as the new logic handles a complete response.
+    // It's left here to avoid breaking other parts of your code.
+    // The new logic in `displayResults` handles the final display.
+    console.log("Partial results received but not displayed. Waiting for final response.");
 }

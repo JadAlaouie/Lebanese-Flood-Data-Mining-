@@ -15,8 +15,6 @@
                 <input type="text" id="query" placeholder="Enter flood-related search terms..." required>
                 <button type="submit">🔍 Search & Scrape</button>
             </form>
-            <button id="analyzeBtn" class="analyze-btn">🤖 Analyze Existing Articles</button>
-            <button id="flaggedBtn" class="flagged-btn">🚩 View Flagged Articles</button>
             <button id="generateQueriesBtn" class="generate-queries-btn">🔍 Generate Search Queries</button>
             
             <!-- Query Generation Form -->
@@ -61,9 +59,7 @@
                     <div class="form-row">
                         <label for="modelSelection">AI Model:</label>
                         <select id="modelSelection">
-                            <option value="llama2">Llama 2</option>
-                            <option value="mistral">Mistral</option>
-                            <option value="codellama">CodeLlama</option>
+                            <option value="gpt-oss:20b">gpt-oss:20b</option>
                         </select>
                     </div>
                     
