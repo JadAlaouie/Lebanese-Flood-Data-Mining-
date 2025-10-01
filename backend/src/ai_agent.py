@@ -1,13 +1,15 @@
 # AI Agent for analyzing scraped flood data using Ollama
-import requests
 import json
 import time
-from typing import Dict, Any, List
+import requests
+from typing import List, Dict, Any
+import re
 
 class FloodAnalysisAgent:
-    def __init__(self, ollama_url="http://localhost:11434", model_name="llama2"):
-        self.ollama_url = ollama_url
+    def __init__(self, ollama_url: str = "http://localhost:11434", model_name: str = "gpt-oss:20b", timeout: int = 120):
+        self.ollama_url = ollama_url.rstrip("/")
         self.model_name = model_name
+        self.timeout = timeout
         
         # Lebanese-specific flood keywords (Arabic + English)
         self.lebanese_keywords = [
@@ -201,7 +203,7 @@ class FloodAnalysisAgent:
         - "category": one of ["flood_news", "flood_preparedness", "flood_research", "flood_policy", "lebanese_flood_content", "not_flood_related"]
         
         Only respond with valid JSON, no other text.
-        """
+        """.strip()
         
         response = self._call_ollama(prompt)
         result = self._parse_ai_response(response)
@@ -246,71 +248,309 @@ class FloodAnalysisAgent:
         - "key_facts": list of 3-5 most important facts
         
         Only respond with valid JSON, no other text.
+        """.strip()
+
+        response = self._call_ollama(prompt)
+        return self._parse_ai_response(response)
+
+    def _call_ollama(self, prompt: str, num_predict: int = 512, temperature: float = 0.2) -> str:
         """
-        
+        Call Ollama. Prefer /api/generate; if unavailable or empty, try /api/chat.
+        Retry once with relaxed params. Return raw text (may be non-JSON).
+        """
+        base = self.ollama_url.rstrip("/")
+
+        def _extract_chat_text(jd: Dict[str, Any]) -> str:
+            if not isinstance(jd, dict):
+                return ""
+            # Standard chat response
+            msg = jd.get("message")
+            if isinstance(msg, dict) and msg.get("content"):
+                return str(msg["content"]).strip()
+            # Some variants return 'messages'
+            msgs = jd.get("messages")
+            if isinstance(msgs, list):
+                parts = [m.get("content", "") for m in msgs if isinstance(m, dict) and m.get("content")]
+                txt = "\n".join([p for p in parts if p]).strip()
+                if txt:
+                    return txt
+            # Some builds still use 'response'
+            if jd.get("response"):
+                return str(jd["response"]).strip()
+            return ""
+
+        def _try_generate(np: int, temp: float) -> str:
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": np, "temperature": temp},
+            }
+            r = requests.post(f"{base}/api/generate", json=payload, timeout=self.timeout)
+            if r.status_code in (404, 405):
+                raise requests.HTTPError(f"/api/generate {r.status_code}", response=r)
+            r.raise_for_status()
+            data = r.json()
+            return (data.get("response") or "").strip()
+
+        def _try_chat(np: int, temp: float) -> str:
+            payload = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant for flood OSINT and Google search query generation."},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {"num_predict": np, "temperature": temp},
+            }
+            rc = requests.post(f"{base}/api/chat", json=payload, timeout=self.timeout)
+            rc.raise_for_status()
+            return _extract_chat_text(rc.json())
+
+        # First attempt: /api/generate
         try:
-            response = self._call_ollama(prompt)
-            return self._parse_ai_response(response)
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def _call_ollama(self, prompt: str) -> str:
-        """
-        Make API call to local Ollama instance
-        """
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False
-        }
-        
-        response = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json=payload,
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            return response.json().get("response", "")
-        else:
-            raise Exception(f"Ollama API error: {response.status_code}")
-    
-    def _parse_ai_response(self, response: str) -> Dict[str, Any]:
-        """
-        Parse AI response as JSON, with fallback handling
-        """
+            txt = _try_generate(num_predict, temperature)
+            if txt:
+                return txt
+        except requests.HTTPError as e:
+            # If 404/405 we'll try chat next; for other errors, attempt chat fallback instead of raising
+            if not (getattr(e, "response", None) and e.response.status_code in (404, 405)):
+                try:
+                    txt = _try_chat(num_predict, max(0.1, temperature))
+                    if txt:
+                        return txt
+                except Exception:
+                    pass
+
+        # Fallback: /api/chat
         try:
-            # Try to find JSON in the response
-            response = response.strip()
-            if response.startswith("```json"):
-                response = response.replace("```json", "").replace("```", "").strip()
-            
-            return json.loads(response)
-        except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
+            txt = _try_chat(num_predict, max(0.1, temperature))
+            if txt:
+                return txt
+        except Exception:
+            pass
+
+        # Retry with relaxed params
+        for np, temp in ((min(1024, num_predict * 2), 0.6), (min(1024, num_predict * 2), 0.8)):
+            try:
+                txt = _try_chat(np, temp)
+                if txt:
+                    return txt
+            except Exception:
+                pass
+            try:
+                txt = _try_generate(np, temp)
+                if txt:
+                    return txt
+            except Exception:
+                pass
+
+        return ""
+
+    def _parse_ai_response(self, text: str) -> Dict[str, Any]:
+        """
+        Parse a JSON response from the model. No dummy fallback; raise if invalid.
+        """
+        if not text:
+            raise ValueError("empty model response")
+
+        # Direct JSON
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        # Try to extract the first JSON object
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except Exception:
+                pass
+
+        raise ValueError("model returned non-JSON response")
+
+    def _generate_algorithmic_queries(self, kw: List[str], count: int, language: str) -> List[str]:
+        """
+        Deterministic query generator used when the model output is empty or needs topping up.
+        Returns up to `count` unique queries based on the provided keywords and language.
+        """
+        count = max(0, int(count or 0))
+        if count == 0:
+            return []
+        ar_ok = str(language or "").lower() in ("arabic", "ar", "mixed")
+        kw = [k for k in kw if k]
+        base_kw = " ".join(kw) if kw else "flood Lebanon"
+
+        seeds = [
+            f'{base_kw} flood Lebanon after:2024-01-01',
+            f'"{base_kw}" site:gov.lb',
+            f'"{base_kw}" filetype:pdf Lebanon',
+            f'intitle:flood Lebanon "{kw[0]}"' if kw else 'intitle:flood Lebanon',
+            f'{kw[0]} river flood Lebanon' if kw else 'river flood Lebanon',
+            f'{kw[0]} coastal flooding Lebanon' if kw else 'coastal flooding Lebanon',
+            f'{kw[0]} flash flood Lebanon' if kw else 'flash flood Lebanon',
+            f'"{kw[0]}" flood site:*.lb' if kw else 'flood site:*.lb',
+            f'"{kw[0]}" precipitation Lebanon 2024..2025' if kw else 'precipitation Lebanon 2024..2025',
+        ]
+        if ar_ok:
+            seeds += [
+                'فيضان لبنان بعد:2024-01-01',
+                'سيول لبنان ملفtype:pdf',  # tolerant spelling kept
+                'نهر الليطاني فيضان',
+                (f'"{kw[0]}" فيضان لبنان' if kw else 'فيضانات لبنان'),
+            ]
+
+        extra: List[str] = []
+        for k in kw[:3] or ["Lebanon"]:
+            extra += [
+                f'"{k}" flood site:gov.lb',
+                f'"{k}" flood site:*.lb after:2024-01-01',
+                f'"{k}" flood filetype:pdf',
+                f'intitle:"{k}" flood Lebanon',
+            ]
+            if ar_ok:
+                extra += [f'"{k}" سيول لبنان', f'"{k}" فيضان لبنان']
+
+        seen, out = set(), []
+        for q in seeds + extra:
+            q = (q or "").strip()
+            if q and q not in seen:
+                seen.add(q)
+                out.append(q)
+            if len(out) >= count:
+                break
+        return out
+
+    def generate_search_queries(self, keywords: List[str], context: str = "", count: int = 10, language: str = "mixed") -> Dict[str, Any]:
+        """
+        Generate up to 100 Google search queries using the current Ollama model.
+        Falls back to algorithmic generation if the model returns empty, and tops up
+        with algorithmic queries if the model returns fewer than requested.
+        """
+        count = max(1, min(int(count or 10), 100))
+        kw = [str(k).strip() for k in (keywords or []) if str(k).strip()]
+        if not kw:
+            raise ValueError("keywords cannot be empty")
+
+        prompt = f"""You are an OSINT assistant generating Google search queries for flood-related research in and around Lebanon.
+
+Mission context: {context or "General flood research for Lebanon."}
+Keywords: {", ".join(kw)}
+Language preference: {language} (mixed = Arabic and English).
+
+Generate {count} diverse, high-signal Google search queries:
+- One query per line, no numbering or explanations.
+- Use search operators when useful: site:, filetype:, intitle:, after:2024-01-01, "exact phrase".
+- Prefer recent info (2024, 2025).
+- Include Arabic queries when language is arabic or mixed.
+Return only the queries, one per line."""
+
+        text = self._call_ollama(prompt)
+
+        # Handle fenced output
+        if text and text.strip().startswith("```"):
+            t = text.strip().strip("`")
+            nl = t.find("\n")
+            text = t[nl + 1 :] if nl != -1 else t
+
+        if not text:
+            # Algorithmic fallback to avoid empty results
+            queries = self._generate_algorithmic_queries(kw, count, language)
             return {
-                "is_relevant": "flood" in response.lower(),
-                "confidence": 50,
-                "keywords_found": [],
-                "summary": "Could not parse AI response properly",
-                "category": "parsing_error",
-                "raw_response": response
+                "ok": True,
+                "model": self.model_name,
+                "requested": count,
+                "count": len(queries),
+                "language": language,
+                "context": context,
+                "keywords": kw,
+                "queries": queries,
+                "agent_fallback_queries": queries,
+                "supplemented": True,
             }
 
-def analyze_scraped_article(url: str, title: str, content: str, model_name: str = "llama2") -> Dict[str, Any]:
+        # Clean lines: remove bullets, leading numbering like "1.", "2)" and common prefixes
+        bullet_re = re.compile(r"^\s*(?:\d+[.)]\s*|[-*•]\s*)")
+        lines = [bullet_re.sub("", ln.strip()) for ln in text.splitlines()]
+        filtered: List[str] = []
+        for ln in lines:
+            if not ln:
+                continue
+            low = ln.lower()
+            if any(t in low for t in ("queries:", "here are", "explanation", "strategy", "example", "suggestions")):
+                continue
+            filtered.append(ln)
+
+        seen, queries = set(), []
+        for q in filtered:
+            if q not in seen:
+                seen.add(q)
+                queries.append(q)
+
+        # Top up with algorithmic queries if fewer than requested
+        supplements: List[str] = []
+        if len(queries) < count:
+            need = count - len(queries)
+            algo = self._generate_algorithmic_queries(kw, need * 2, language)  # request a few extra to avoid dups
+            for q in algo:
+                if q not in seen:
+                    seen.add(q)
+                    supplements.append(q)
+                    queries.append(q)
+                if len(queries) >= count:
+                    break
+
+        queries = queries[:count]
+        if not queries:
+            # Absolute fallback; should be rare
+            queries = self._generate_algorithmic_queries(kw, count, language)
+            supplements = queries
+
+        result = {
+            "ok": True,
+            "model": self.model_name,
+            "requested": count,
+            "count": len(queries),
+            "language": language,
+            "context": context,
+            "keywords": kw,
+            "queries": queries,
+        }
+        if supplements:
+            result["supplemented"] = True
+            result["agent_supplements"] = supplements
+        return result
+def analyze_scraped_article(
+    url: str, title: str, content: str, model_name: str = "gpt-oss:20b", context: str = None
+) -> Dict[str, Any]:
     """
-    Convenience function to analyze a scraped article
+    Analyze a scraped article, optionally filtering by a custom context/prompt.
+    If context is provided, use the AI model to determine relevance to the context.
     """
     agent = FloodAnalysisAgent(model_name=model_name)
-    
-    # Check if flood-related
+
+    if context:
+        # Use the provided context (prompt) directly, formatting in the article title/content
+        prompt = f"{context}\n\nArticle Title: {title}\nArticle Content: {content}\n"
+        response = agent._call_ollama(prompt)
+        # Try to parse as JSON, fallback to raw text
+        try:
+            extracted_info = json.loads(response)
+        except Exception:
+            extracted_info = response.strip()
+        return {
+            "url": url,
+            "extracted_info": extracted_info,
+            "analyzed_at": str(time.time())
+        }
+
+    # Default: use flood relevance logic
     relevance_analysis = agent.is_flood_related(title, content)
-    
-    # If relevant, extract detailed info
     detailed_info = {}
     if relevance_analysis.get("is_relevant", False):
         detailed_info = agent.extract_key_info(title, content)
-    
     return {
         "url": url,
         "relevance_analysis": relevance_analysis,

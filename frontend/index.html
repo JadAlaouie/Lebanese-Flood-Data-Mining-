@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flood Data Mining - Search & Analyze</title>
     <link rel="stylesheet" href="styles.css">
+    <style>
+#results, #savedArticlesContainer, .result-item, .saved-article-item {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  word-break: break-word;
+}
+.result-item, .saved-article-item {
+  width: 100%;
+  margin: 0 auto;
+}
+</style>
 </head>
 <body>
     <div class="container">
@@ -16,8 +28,9 @@
                 <button type="submit">🔍 Search & Scrape</button>
             </form>
             <button id="generateQueriesBtn" class="generate-queries-btn">🔍 Generate Search Queries</button>
+            <button id="filterAIButton" class="filter-ai-btn">🤖 Filter with AI</button>
+            <button id="viewSavedBtn" class="view-saved-btn">💾 View Saved Articles</button>
             
-            <!-- Query Generation Form -->
             <div class="query-generation" id="queryGeneration" style="display: none;">
                 <div class="query-form">
                     <h3>🤖 AI Query Generation Agent</h3>
@@ -69,29 +82,24 @@
                     </div>
                 </div>
                 
-                <!-- Generated Queries Display -->
                 <div class="generated-queries" id="generatedQueries" style="display: none;">
                     <h3>📝 AI Agent Generated Search Queries</h3>
                     
-                    <!-- Agent Reasoning Display -->
                     <div class="agent-reasoning" id="agentReasoning" style="display: none;">
                         <h4>🧠 Agent Reasoning</h4>
                         <div class="reasoning-content" id="reasoningContent"></div>
                     </div>
                     
-                    <!-- Query Strategies Display -->
                     <div class="query-strategies" id="queryStrategiesDisplay" style="display: none;">
                         <h4>🎯 Query Strategies</h4>
                         <div class="strategies-list" id="strategiesList"></div>
                     </div>
                     
-                    <!-- Search Focus Areas -->
                     <div class="search-focus" id="searchFocusDisplay" style="display: none;">
                         <h4>🔍 Search Focus Areas</h4>
                         <div class="focus-list" id="focusList"></div>
                     </div>
                     
-                    <!-- Generated Queries List -->
                     <div class="queries-container">
                         <div class="queries-stats" id="queriesStats"></div>
                         <div class="queries-list" id="queriesList"></div>
@@ -105,7 +113,6 @@
                 </div>
             </div>
             
-            <!-- Enhanced Loading Indicators -->
             <div class="loading-container">
                 <div class="loading" id="loading">
                     <div class="spinner"></div>
@@ -121,11 +128,7 @@
                     <div class="spinner"></div>
                     <div class="loading-text">Analyzing articles with AI...</div>
                 </div>
-                <div class="loading" id="flaggedLoading">
-                    <div class="spinner"></div>
-                    <div class="loading-text">Loading flagged articles from database...</div>
                 </div>
-            </div>
         </div>
 
         <div class="results-section">
@@ -141,7 +144,84 @@
         </div>
     </div>
     
-    <!-- Include the JavaScript file -->
-    <script src="script.js"></script>
+    <div id="savedArticlesSection" class="saved-articles-section" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <h2 style="margin: 0;">💾 Saved Articles <span id="savedArticlesCount">0 saved articles</span></h2>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button id="exportExcelBtn" class="export-btn" style="background: #388e3c; color: white; border-radius: 4px; padding: 6px 14px; border: none; cursor: pointer;">⬇️ Export to Excel</button>
+                <button id="exportAIFilteredBtn" class="export-btn" style="background: #1976d2; color: white; border-radius: 4px; padding: 6px 14px; border: none; cursor: pointer;" title="Apply AI classification to saved articles and export">🤖 Classify & Export Saved Articles</button>
+                <button id="closeSavedBtn" class="close-btn" style="margin-left: 0;">Close Saved Articles</button>
+            </div>
+        </div>
+        <div class="loading" id="flaggedLoading" style="display: none; justify-content: center; padding: 20px; flex-direction: column; align-items: center;">
+            <div class="spinner"></div>
+            <div class="loading-text">Loading flagged articles from database...</div>
+        </div>
+        <ul id="savedArticlesContainer" class="saved-articles-list">
+            <li style="text-align: center; padding: 20px;">Saved articles will appear here.</li>
+        </ul>
+        <div class="empty-state" id="emptySavedState" style="display: none;">
+            <div class="empty-icon">📂</div>
+            <h3>No Articles Saved Yet</h3>
+            <p>Click the save icon (💾) on an article to store it here for later.</p>
+        </div>
+    </div>
+    <script src="script.js?v=2"></script>
 </body>
-</html>
+        <style>
+#results, #savedArticlesContainer, .result-item, .saved-article-item {
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: auto;
+    word-break: break-word;
+}
+.result-item, .saved-article-item {
+    width: 100%;
+    margin: 0 auto;
+}
+.results-section, .saved-articles-section {
+    max-width: 100%;
+    overflow-x: auto;
+    box-sizing: border-box;
+}
+.saved-articles-section {
+    position: relative;
+    padding-top: 20px;
+}
+.close-btn {
+    position: relative;
+    top: 0;
+    right: 0;
+    margin-bottom: 0;
+    margin-top: 0;
+}
+/* Responsive image gallery with frames */
+.image-gallery {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    max-width: 100%;
+    overflow-x: auto;
+}
+.image-frame {
+    width: 80px;
+    height: 80px;
+    border: 1.5px solid #ccc;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fafafa;
+    flex: 0 0 auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.image-frame img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: cover;
+    display: block;
+}
+        </style>

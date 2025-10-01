@@ -2,6 +2,13 @@ import sqlite3
 import json
 from datetime import datetime
 
+# Helper function to convert SQLite rows to dictionary
+def dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
+
 def init_db(db_path='flood_data.db'):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -76,9 +83,89 @@ def init_db(db_path='flood_data.db'):
                   key_facts TEXT,
                   analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   FOREIGN KEY (article_id) REFERENCES scraped_articles (id))''')
+
+    # New table for saved articles
+    c.execute('''CREATE TABLE IF NOT EXISTS saved_articles
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  url TEXT NOT NULL UNIQUE,
+                  title TEXT,
+                  snippet TEXT,
+                  full_content TEXT,
+                  word_count INTEGER,
+                  image_count INTEGER DEFAULT 0,
+                  images TEXT,
+                  flagged INTEGER DEFAULT 0,
+                  saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     
     conn.commit()
     conn.close()
+
+# --- MISSING FUNCTIONS ADDED HERE ---
+
+def save_article_to_saved(url, title, snippet, full_content, word_count, image_count, images, flagged, db_path='flood_data.db'):
+    """Save an article to the saved_articles table."""
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    images_json = json.dumps(images) if images else '[]'
+    
+    try:
+        c.execute('''INSERT INTO saved_articles 
+                     (url, title, snippet, full_content, word_count, image_count, images, flagged)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(url) DO UPDATE SET
+                     title=excluded.title, 
+                     full_content=excluded.full_content,
+                     flagged=excluded.flagged,
+                     saved_at=CURRENT_TIMESTAMP
+                  ''', 
+                  (url, title, snippet, full_content, word_count, image_count, images_json, flagged))
+        conn.commit()
+        return {"success": True, "message": "Article saved/updated successfully."}
+    except sqlite3.IntegrityError as e:
+        print(f"[DB] IntegrityError saving article: {url}\nError: {e}\nData: title={title}, snippet={snippet}, full_content={full_content}, word_count={word_count}, image_count={image_count}, images={images_json}, flagged={flagged}")
+        return {"success": False, "message": f"Integrity Error: {e}"}
+    except Exception as e:
+        print(f"[DB] General DB Error saving article: {url}\nError: {e}\nData: title={title}, snippet={snippet}, full_content={full_content}, word_count={word_count}, image_count={image_count}, images={images_json}, flagged={flagged}")
+        return {"success": False, "message": f"Database Error: {e}"}
+    finally:
+        conn.close()
+
+def get_saved_articles(db_path='flood_data.db'):
+    """Retrieve all articles from the saved_articles table."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = dict_factory  # Use dict_factory for easier JSON conversion
+    c = conn.cursor()
+    
+    c.execute('SELECT * FROM saved_articles ORDER BY saved_at DESC')
+    articles = c.fetchall()
+    
+    # Process images field from JSON string back to list/dict
+    for article in articles:
+        try:
+            article['images'] = json.loads(article['images'])
+        except (json.JSONDecodeError, TypeError):
+            article['images'] = []
+            
+    conn.close()
+    return articles
+
+def delete_saved_article(url, db_path='flood_data.db'):
+    """Delete an article from the saved_articles table by URL."""
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    c.execute('DELETE FROM saved_articles WHERE url = ?', (url,))
+    
+    if c.rowcount > 0:
+        conn.commit()
+        conn.close()
+        return {"success": True, "message": f"Article deleted: {url}"}
+    else:
+        conn.close()
+        return {"success": False, "message": f"Article not found: {url}"}
+
+# --- EXISTING FUNCTIONS BELOW ---
 
 def save_ai_analysis(article_id: int, url: str, analysis_result: dict, db_path='flood_data.db'):
     """Save AI analysis results to database"""
@@ -92,16 +179,16 @@ def save_ai_analysis(article_id: int, url: str, analysis_result: dict, db_path='
                  (article_id, url, is_relevant, confidence, keywords_found, summary, category, 
                   location, flood_type, severity, key_facts)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-              (article_id, url,
-               relevance.get('is_relevant', 0),
-               relevance.get('confidence', 0),
-               json.dumps(relevance.get('keywords_found', [])),
-               relevance.get('summary', ''),
-               relevance.get('category', ''),
-               json.dumps(detailed.get('location', [])),
-               detailed.get('flood_type', ''),
-               detailed.get('severity', ''),
-               json.dumps(detailed.get('key_facts', []))))
+             (article_id, url,
+              relevance.get('is_relevant', 0),
+              relevance.get('confidence', 0),
+              json.dumps(relevance.get('keywords_found', [])),
+              relevance.get('summary', ''),
+              relevance.get('category', ''),
+              json.dumps(detailed.get('location', [])),
+              detailed.get('flood_type', ''),
+              detailed.get('severity', ''),
+              json.dumps(detailed.get('key_facts', []))))
     
     conn.commit()
     conn.close()
@@ -138,7 +225,7 @@ def save_scraped_article(url, title, content, word_count, source_query, success,
     c.execute('''INSERT INTO scraped_articles 
                  (url, title, content, word_count, image_count, source_query, success)
                  VALUES (?, ?, ?, ?, ?, ?, ?)''',
-              (url, title, content, word_count, image_count, source_query, success))
+             (url, title, content, word_count, image_count, source_query, success))
     
     article_id = c.lastrowid
     conn.commit()
@@ -159,10 +246,10 @@ def save_scraped_images(article_id, images, db_path='flood_data.db'):
         c.execute('''INSERT INTO scraped_images 
                      (article_id, image_url, alt_text, caption, title, width, height, 
                       local_path, file_size, downloaded)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (article_id, img['url'], img['alt_text'], img['caption'], 
-                   img['title'], img['width'], img['height'], img['local_path'], 
-                   img['file_size'], img['downloaded']))
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                 (article_id, img.get('url'), img.get('alt_text'), img.get('caption'), 
+                  img.get('title'), img.get('width'), img.get('height'), img.get('local_path'), 
+                  img.get('file_size'), img.get('downloaded', 0)))
     
     conn.commit()
     conn.close()
